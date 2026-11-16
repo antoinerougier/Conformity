@@ -1,0 +1,90 @@
+# =============================================================================
+# EU AI Compliance Auditor - complete local stack
+#   docker compose up -d --build
+#   NVIDIA GPU: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+# =============================================================================
+name: eu-ai-compliance-auditor
+
+x-models: &models
+  LLM_MODEL: ${LLM_MODEL:-qwen2.5:14b}
+  JUDGE_MODEL: ${JUDGE_MODEL:-qwen2.5:14b}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
+
+services:
+  ollama:
+    image: ollama/ollama:${OLLAMA_IMAGE_TAG:-latest}
+    container_name: compliance-ollama
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    environment:
+      OLLAMA_MODELS_TO_PULL: "${LLM_MODEL:-qwen2.5:14b},${JUDGE_MODEL:-qwen2.5:14b},${EMBEDDING_MODEL:-bge-m3}"
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-2}
+      OLLAMA_HOST: 0.0.0.0:11434
+    volumes:
+      - ollama_models:/root/.ollama
+      - ./docker/ollama/entrypoint.sh:/entrypoint.sh:ro
+    ports:
+      - "127.0.0.1:11434:11434"
+    healthcheck:
+      # Healthy only once the API answers AND every model has been pulled.
+      test: ["CMD-SHELL", "test -f /tmp/ollama-models-ready && ollama list >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 240
+      start_period: 30s
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:${QDRANT_IMAGE_TAG:-v1.15.4}
+    container_name: compliance-qdrant
+    environment:
+      QDRANT__TELEMETRY_DISABLED: "true"
+      # To enable authentication: set QDRANT__SERVICE__API_KEY here AND QDRANT_API_KEY for the app.
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    ports:
+      - "127.0.0.1:6333:6333"
+    healthcheck:
+      # The Qdrant image ships without curl: native bash TCP probe.
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PRELOAD_RERANKER: "true"
+    image: eu-ai-compliance-auditor:latest
+    container_name: compliance-app
+    environment:
+      <<: *models
+      OLLAMA_BASE_URL: http://ollama:11434
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY:-}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-eu_legal_corpus}
+      RERANKER_BACKEND: ${RERANKER_BACKEND:-flashrank}
+      LLM_NUM_CTX: ${LLM_NUM_CTX:-16384}
+      AUTO_INDEX: ${AUTO_INDEX:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - app_data:/app/data/reports
+      - app_uploads:/app/data/uploads
+    ports:
+      - "127.0.0.1:8501:8501"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  ollama_models:
+  qdrant_storage:
+  app_data:
+  app_uploads:

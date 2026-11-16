@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+.cache
+.mypy_cache
+.ruff_cache
+.pytest_cache
+**/__pycache__
+data/uploads
+data/reports
+data/qdrant_local
+tests
+.env
+*.md
+!README.md
