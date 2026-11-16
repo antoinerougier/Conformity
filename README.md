@@ -17,8 +17,6 @@
 
 </div>
 
-> Replace `OWNER` in the CI badge URL with your GitHub user or organisation.
-
 **EU AI Compliance Auditor** is a fully local multi-agent RAG application that audits an AI
 project (PDF or PowerPoint) against the EU AI Act and the GDPR. It determines the project's
 risk category, its applicable obligations and exact deadlines, and delivers a prioritised,
