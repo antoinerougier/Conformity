@@ -123,8 +123,8 @@ Requirements: Docker ≥ 24 with Compose v2, and about 16 GB of RAM for `qwen2.5
 smaller model, see [Configuration](#configuration)).
 
 ```bash
-git clone https://github.com/OWNER/eu-ai-compliance-auditor.git
-cd eu-ai-compliance-auditor
+git clone https://github.com/antoinerougier/Conformity.git
+cd Conformity
 cp .env.example .env          # optional: choose the models
 
 docker compose up -d --build  # NVIDIA GPU: add -f docker-compose.gpu.yml
