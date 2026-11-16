@@ -4,7 +4,6 @@
 
 **Local, privacy-by-design compliance audit of AI projects against the EU AI Act and the GDPR**
 
-[![CI](https://github.com/OWNER/eu-ai-compliance-auditor/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/eu-ai-compliance-auditor/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
 ![FastAPI](https://img.shields.io/badge/web-FastAPI-009688)
 ![uv](https://img.shields.io/badge/deps-uv-6340ac)
@@ -162,8 +161,8 @@ flowchart LR
 Requirements: Docker ≥ 24 with Compose v2, and about 16 GB of RAM for `qwen2.5:14b`.
 
 ```bash
-git clone https://github.com/OWNER/eu-ai-compliance-auditor.git
-cd eu-ai-compliance-auditor
+git clone https://github.com/antoinerougier/Conformity.git
+cd Conformity
 cp .env.example .env          # optional: choose the models
 
 docker compose up -d --build  # NVIDIA GPU: add -f docker-compose.gpu.yml
