@@ -17,6 +17,7 @@ START -> parse_document -> profile_project -> plan_queries -> retrieve -> rethin
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -30,7 +31,7 @@ from src.core.config import Settings, get_settings
 from src.core.exceptions import AuditExecutionError
 from src.core.llm import LLMService, OllamaLLMService
 from src.core.types import validated
-from src.models.schemas import AuditReport, AuditState
+from src.models.schemas import AuditReport, AuditState, ProjectDocument, ProjectProfile
 from src.rag.retriever import HybridRetriever, build_retriever
 
 AGENT_NODES = ["classify_ai_act", "audit_gdpr"]
@@ -108,20 +109,34 @@ class ComplianceAuditor:
             "recursion_limit": _BASE_RECURSION_LIMIT + 2 * (self.deps.settings.max_rethink_iterations + 1)
         }
 
+    @staticmethod
+    def _state_for_file(project_path: Path) -> AuditState:
+        return AuditState(project_path=str(project_path))
+
+    @staticmethod
     @validated
-    def run(self, project_path: FilePath) -> AuditReport:
-        """Run the full audit and return the report."""
-        result = self.graph.invoke(AuditState(project_path=str(project_path)), config=self._config())
+    def state_for_context(
+        document: ProjectDocument, profile: ProjectProfile | None = None, interview_transcript: str = ""
+    ) -> AuditState:
+        """Initial state for an audit whose context was gathered by an assessment session."""
+        return AuditState(
+            project_path=document.file_name,
+            file_name=document.file_name,
+            document=document,
+            profile=profile,
+            interview_transcript=interview_transcript,
+        )
+
+    def invoke(self, initial: AuditState) -> AuditReport:
+        result = self.graph.invoke(initial, config=self._config())
         report = result.get("report")
         if not isinstance(report, AuditReport):
             raise AuditExecutionError("The graph finished without producing a report")
         return report
 
-    @validated
-    def stream(self, project_path: FilePath) -> Iterator[ProgressEvent | AuditReport]:
+    def iter_events(self, initial: AuditState) -> Iterator[ProgressEvent | AuditReport]:
         """Yield one :class:`ProgressEvent` per executed node, then the final report."""
         report: AuditReport | None = None
-        initial = AuditState(project_path=str(project_path))
         for chunk in self.graph.stream(initial, config=self._config(), stream_mode="updates"):
             for node, raw_update in chunk.items():
                 update = raw_update or {}
@@ -136,6 +151,16 @@ class ComplianceAuditor:
         if report is None:
             raise AuditExecutionError("The graph finished without producing a report")
         yield report
+
+    @validated
+    def run(self, project_path: FilePath) -> AuditReport:
+        """Run the full audit on a document file and return the report (CLI / scripts)."""
+        return self.invoke(self._state_for_file(project_path))
+
+    @validated
+    def stream(self, project_path: FilePath) -> Iterator[ProgressEvent | AuditReport]:
+        """Streamed variant of :meth:`run`."""
+        return self.iter_events(self._state_for_file(project_path))
 
     def mermaid(self) -> str:
         return str(self.graph.get_graph().draw_mermaid())

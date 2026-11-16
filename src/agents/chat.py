@@ -1,7 +1,7 @@
-"""Contextual conversational assistant (page 2 chatbot) and legal QA.
+"""Report assistant (chat on the report page) and legal QA.
 
 The same pipeline (hybrid retrieval -> reranking -> grounded generation) serves:
-- the Streamlit chatbot (:meth:`ComplianceAssistant.stream_answer`), contextualised by the
+- the report assistant of the web app (:meth:`ComplianceAssistant.stream_answer`), contextualised by the
   audit report;
 - the Ragas evaluation (:meth:`ComplianceAssistant.answer`), which measures the faithfulness
   and relevance of this pipeline.

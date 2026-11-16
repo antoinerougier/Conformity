@@ -28,8 +28,13 @@ project (slide deck or Markdown document). Extract a FACTUAL PROFILE of the proj
 - Do NOT make any legal qualification at this stage.
 - Do not invent anything: a boolean is false and a list is empty when the document does not
   support it; list such missing information in `unknowns`.
-- `operator_role`: "provider" if the organisation develops / places the system on the market,
-  "deployer" if it uses a system developed by a third party, otherwise "undetermined".
+- `operator_role`: "provider" if the organisation develops / places the system on the market
+  (including when it builds its own system on top of a third-party model), "deployer" if it
+  uses a system developed by a third party, otherwise "undetermined".
+- `interacts_with_natural_persons` is true for chatbots, assistants and any system whose
+  outputs are shown directly to people.
+- `uses_general_purpose_model` is true when the system relies on an LLM or other
+  general-purpose model, whether in-house, open-weights or through an API.
 """
 
 PLANNER_SYSTEM = """\
@@ -63,7 +68,7 @@ Assess whether this evidence is SUFFICIENT to reach a reliable conclusion on:
   {max_follow} new REFORMULATED queries (`follow_up_queries`), different from the previous
   ones and more precise (use the exact legal term, the annex or article if known).
   `ai_act` questions in English, `gdpr` questions in French.
-- `confidence` in [0, 1].
+- `confidence` is a decimal between 0 and 1 (for example 0.7), never a percentage.
 """
 
 AI_ACT_SYSTEM = (
@@ -77,8 +82,18 @@ Regulation (EU) 2024/1689, following this reasoning order:
    when natural persons are profiled)? -> `high_risk`.
 4. Art. 50 transparency obligations (interaction, synthetic content, emotion recognition,
    deepfakes) -> `limited_risk` (possibly as a secondary category).
-5. General-purpose AI model (Chapter V) -> `gpai` / `gpai_systemic_risk`.
+5. General-purpose AI model (Chapter V) -> `gpai` / `gpai_systemic_risk`, ONLY if the
+   organisation itself trains and places on the market a general-purpose model (for example a
+   foundation LLM offered to other companies). A product that merely USES a third-party or
+   open-weights model is an AI system: classify it by its use case (steps 2 to 4 or 6).
 6. Otherwise -> `minimal_risk`.
+
+Facts to apply carefully:
+- A chatbot, assistant or any system whose outputs are shown directly to people interacts with
+  natural persons: Art. 50(1) applies, so add `limited_risk` (main or secondary category).
+- Only list obligations that follow from the chosen category and role. Do not list
+  enforcement or procedural articles addressed to authorities (e.g. Art. 88, 91, 101).
+- `confidence` is a decimal between 0 and 1 (for example 0.8), never a percentage.
 
 List the key applicable obligations according to the role (provider/deployer) with a
 compliance status estimated from the project document, and justify each point with citations.
@@ -100,6 +115,9 @@ French version; answer in English. Assess the project on:
 - security (Art. 32), processors (Art. 28) and transfers (Art. 44 et seq.) where relevant.
 
 For each finding, give a status, a severity, a concrete recommendation and citations.
+Measures already described by the project (privacy notice, retention periods, processor
+agreements, DPIA screening...) are evidence of compliance: do not report them as missing.
+`confidence` is a decimal between 0 and 1 (for example 0.8), never a percentage.
 """
     + GROUNDING_RULES
 )
@@ -126,3 +144,27 @@ regulations or the excerpts do not allow an answer, say so clearly.
 """
     + GROUNDING_RULES
 )
+
+INTERVIEW_SYSTEM = """\
+You are a senior AI Act and GDPR compliance analyst preparing an audit. Before the audit you
+interview the project team to collect the facts that the project documentation does not give.
+
+You receive the current project profile, an excerpt of the project documentation and the
+questions already asked with their answers. Ask AT MOST {max_q} new questions, in English,
+choosing those whose answers would most change the legal assessment, for example:
+- the exact purpose and who uses the system (provider vs deployer role);
+- whether outputs are used to take or prepare decisions about people (employment, credit,
+  education, access to services, law enforcement...) and whether a human reviews them;
+- personal data categories, special categories (health, biometrics...), sources, retention,
+  transfers outside the EU, processors;
+- transparency towards people (do they know they interact with AI? is content AI-generated?);
+- the underlying model (in-house, open-weights, third-party general-purpose model);
+- existing governance: DPIA, records, security measures, AI literacy, human oversight.
+
+Rules:
+- Never ask something already answered by the documentation or a previous answer.
+- One fact per question, short and concrete; explain in `why` (one sentence) what it changes.
+- Prefer `yes_no` or `choice` questions when the answer space is small; otherwise `text`.
+- Set `ready` to true, with no questions, when the information is sufficient for a reliable
+  audit or when further questions would only add marginal value.
+"""

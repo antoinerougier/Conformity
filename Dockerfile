@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # =============================================================================
-# EU AI Compliance Auditor - application image (Streamlit + LangGraph)
+# EU AI Compliance Auditor - application image (FastAPI + LangGraph)
 # Multi-stage build: uv resolves and installs dependencies into an isolated venv;
 # the final image contains neither uv, nor a compiler, nor any cache.
 # =============================================================================
@@ -35,17 +35,14 @@ RUN if [ "$PRELOAD_RERANKER" = "true" ]; then \
 FROM python:${PYTHON_VERSION}-slim-bookworm AS runtime
 
 LABEL org.opencontainers.image.title="eu-ai-compliance-auditor" \
-      org.opencontainers.image.description="Local EU AI Act & GDPR audit (RAG + LangGraph agents)" \
+      org.opencontainers.image.description="Local EU AI Act & GDPR audit (FastAPI + RAG + LangGraph agents)" \
       org.opencontainers.image.licenses="MIT"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:${PATH}" \
     RERANKER_CACHE_DIR=/opt/rerankers \
-    STREAMLIT_SERVER_HEADLESS=true \
-    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
-    STREAMLIT_SERVER_PORT=8501 \
-    STREAMLIT_SERVER_ADDRESS=0.0.0.0
+    PORT=8000
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl tini \
@@ -58,21 +55,18 @@ WORKDIR /app
 COPY --from=builder --chown=app:app /opt/venv /opt/venv
 COPY --from=builder --chown=app:app /opt/rerankers /opt/rerankers
 COPY --chown=app:app src ./src
-COPY --chown=app:app pages ./pages
-COPY --chown=app:app app.py ./
-COPY --chown=app:app .streamlit ./.streamlit
 COPY --chown=app:app data/regulations ./data/regulations
 COPY --chown=app:app data/processed ./data/processed
 COPY --chown=app:app --chmod=0755 docker/app/entrypoint.sh /usr/local/bin/app-entrypoint.sh
 
-RUN mkdir -p /app/data/uploads /app/data/reports /app/.cache && chown -R app:app /app/data /app/.cache
+RUN mkdir -p /app/data/uploads /app/.cache && chown -R app:app /app/data /app/.cache
 
 USER app
 
-EXPOSE 8501
+EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=5 \
-    CMD curl -fsS http://localhost:8501/_stcore/health || exit 1
+    CMD curl -fsS "http://localhost:${PORT}/healthz" || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/app-entrypoint.sh"]
-CMD ["streamlit", "run", "app.py"]
+CMD ["sh", "-c", "exec uvicorn src.api.app:app --host 0.0.0.0 --port ${PORT} --proxy-headers --timeout-keep-alive 75"]

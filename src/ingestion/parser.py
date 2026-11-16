@@ -87,7 +87,13 @@ def _parse_pdf(path: Path) -> tuple[str | None, list[ProjectSection]]:
 
     with pymupdf.open(path) as doc:  # type: ignore[no-untyped-call]
         meta_title = (doc.metadata or {}).get("title") or None
-    pages: list[dict[str, Any]] = pymupdf4llm.to_markdown(str(path), page_chunks=True, show_progress=False)
+    try:
+        # No OCR: text-based documents only (scanned files are rejected with a clear message).
+        pages: list[dict[str, Any]] = pymupdf4llm.to_markdown(
+            str(path), page_chunks=True, show_progress=False, use_ocr=False
+        )
+    except TypeError:  # older pymupdf4llm without the layout engine / OCR option
+        pages = pymupdf4llm.to_markdown(str(path), page_chunks=True, show_progress=False)
     sections: list[ProjectSection] = []
     for index, page in enumerate(pages, start=1):
         md = str(page.get("text", "")).strip()

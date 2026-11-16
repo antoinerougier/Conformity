@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Assessment - EU AI Compliance Auditor{% endblock %}
+{% block content %}
+{% if not session %}
+{# ------------------------------------------------------------------ start #}
+<div class="intro">
+  <h1>Tell us about the project</h1>
+  <p>Upload the document that describes your AI system, add anything it leaves out, and the assistant will ask the questions it needs before running the audit.</p>
+</div>
+<form id="start-form" class="start-grid" enctype="multipart/form-data" novalidate>
+  <div>
+    <label class="dropzone" id="dropzone" for="file">
+      <input type="file" id="file" name="file" accept=".pdf,.pptx,application/pdf,application/vnd.openxmlformats-officedocument.presentationml.presentation">
+      <span>
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#1f4fa3" stroke-width="1.5" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 18v-6M9 15l3-3 3 3"/></svg>
+        <strong>Drop the project deck here</strong>
+        <span class="muted">or click to choose a .pdf or .pptx file (up to {{ settings.max_upload_mb }} MB)</span>
+        <span class="file-name" id="file-name" aria-live="polite"></span>
+      </span>
+    </label>
+  </div>
+  <div>
+    <label for="description">Context the document doesn't give <span class="muted">(optional with a file, required without)</span></label>
+    <textarea id="description" name="description" rows="10" placeholder="What the system does, who uses it, which data it relies on, and anything already in place: DPIA, human review, hosting..."></textarea>
+  </div>
+  <div class="start-actions" style="grid-column: 1 / -1">
+    <button class="btn btn--primary" type="submit" id="start-button">Start the interview</button>
+    <span class="working" id="start-working"><span class="spinner" aria-hidden="true"></span>Reading the project and preparing questions. With a local model this can take a minute.</span>
+    <p class="form-error" id="start-error" role="alert"></p>
+  </div>
+</form>
+
+<section class="section" id="open-report" aria-labelledby="open-title" style="margin-top: 3rem;">
+  <header><div><h2 id="open-title">Open a saved report</h2><p>Re-open a report exported as JSON to update its checklist or ask the assistant about it.</p></div></header>
+  <form id="import-form" class="start-actions" style="margin-top: 0">
+    <input type="file" id="import-file" name="file" accept=".json,application/json" aria-label="JSON report">
+    <button class="btn btn--quiet" type="submit">Open report</button>
+    <p class="form-error" id="import-error" role="alert"></p>
+  </form>
+</section>
+
+{% else %}
+{# ------------------------------------------------------------------ interview #}
+{% set p = session.profile %}
+{% set current = session.current_round %}
+<div class="interview" data-session="{{ session.session_id }}">
+  <aside class="dossier panel" aria-labelledby="dossier-title">
+    <h2 id="dossier-title">{{ p.project_name if p else "Your project" }}</h2>
+    <p>What the assistant knows so far. It updates after each round.</p>
+    {% if p %}
+    <dl>
+      <dt>Purpose</dt><dd>{{ p.purpose }}</dd>
+      <dt>Sector</dt><dd>{{ p.sector }}</dd>
+      <dt>Your role</dt><dd>{{ p.operator_role.value | capitalize }}</dd>
+      {% if p.personal_data_categories %}<dt>Personal data</dt><dd>{{ p.personal_data_categories | join(", ") }}</dd>{% endif %}
+      <dt>Signals</dt>
+      <dd class="flags">
+        {% if p.automated_decisions %}<span class="tag" data-tone="high">Automated decisions</span>{% endif %}
+        {% if p.profiling %}<span class="tag" data-tone="high">Profiling</span>{% endif %}
+        {% if p.biometric_processing %}<span class="tag" data-tone="critical">Biometrics</span>{% endif %}
+        {% if p.special_category_data %}<span class="tag" data-tone="critical">Special-category data</span>{% endif %}
+        {% if p.interacts_with_natural_persons %}<span class="tag" data-tone="medium">Talks to people</span>{% endif %}
+        {% if p.generates_synthetic_content %}<span class="tag" data-tone="medium">Generates content</span>{% endif %}
+        {% if p.uses_general_purpose_model %}<span class="tag" data-tone="medium">General-purpose model</span>{% endif %}
+        {% if p.international_transfers %}<span class="tag" data-tone="high">Transfers outside the EU</span>{% endif %}
+        {% if p.dpia_mentioned %}<span class="tag" data-tone="low">DPIA mentioned</span>{% endif %}
+        {% if p.human_oversight_mentioned %}<span class="tag" data-tone="low">Human oversight</span>{% endif %}
+      </dd>
+    </dl>
+    {% if p.unknowns %}
+    <div class="unknowns"><strong>Still unclear</strong><ul>{% for u in p.unknowns[:5] %}<li>{{ u }}</li>{% endfor %}</ul></div>
+    {% endif %}
+    {% endif %}
+  </aside>
+
+  <div>
+    {% set answered = session.rounds | selectattr("answered") | list %}
+    {% if answered %}
+    <div class="previous">
+      {% for r in answered %}
+      <details>
+        <summary>Round {{ r.number }}: {{ r.questions | length }} questions answered</summary>
+        <dl>
+          {% set by_id = {} %}{% for a in r.answers %}{% set _ = by_id.update({a.question_id: a}) %}{% endfor %}
+          {% for q in r.questions %}
+          <dt>{{ q.question }}</dt>
+          <dd>{% set a = by_id.get(q.question_id) %}{% if a and not a.skipped and a.answer %}{{ a.answer }}{% else %}<span class="muted">Skipped</span>{% endif %}</dd>
+          {% endfor %}
+        </dl>
+      </details>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if session.status == "interviewing" and current %}
+    <div class="round-head">
+      <h1 style="font-size: var(--t-xl)">The assistant has {{ current.questions | length }} question{{ "s" if current.questions | length > 1 }}</h1>
+      <div class="round-meter" aria-label="Round {{ current.number }} of up to {{ settings.max_interview_rounds }}">
+        {% for i in range(1, settings.max_interview_rounds + 1) %}<i data-state="{{ 'done' if i < current.number else ('current' if i == current.number else 'todo') }}"></i>{% endfor %}
+      </div>
+    </div>
+    <form id="answers-form" novalidate>
+      {% for q in current.questions %}
+      <fieldset class="question" data-qid="{{ q.question_id }}" data-type="{{ q.answer_type }}">
+        <legend><span class="q-index">{{ loop.index }}.</span>{{ q.question }}</legend>
+        <div class="q-meta">
+          {% if q.regulation %}<span class="cite">{{ q.regulation.short }}</span>{% endif %}
+          {% if q.why %}<span class="why">{{ q.why }}</span>{% endif %}
+        </div>
+        {% if q.answer_type == "yes_no" %}
+        <div class="choices" role="radiogroup">
+          {% for opt in ["Yes", "No", "Not sure"] %}
+          <label><input type="radio" name="{{ q.question_id }}" value="{{ opt }}"><span>{{ opt }}</span></label>
+          {% endfor %}
+        </div>
+        <textarea class="detail" name="{{ q.question_id }}-detail" rows="2" placeholder="Add details (optional)" aria-label="Details for question {{ loop.index }}"></textarea>
+        {% elif q.answer_type == "choice" %}
+        <div class="choices" role="radiogroup">
+          {% for opt in q.options %}
+          <label><input type="radio" name="{{ q.question_id }}" value="{{ opt }}"><span>{{ opt }}</span></label>
+          {% endfor %}
+        </div>
+        <textarea class="detail" name="{{ q.question_id }}-detail" rows="2" placeholder="Add details (optional)" aria-label="Details for question {{ loop.index }}"></textarea>
+        {% else %}
+        <textarea name="{{ q.question_id }}" rows="3" aria-label="Answer to question {{ loop.index }}"></textarea>
+        {% endif %}
+      </fieldset>
+      {% endfor %}
+      <div class="answer-bar">
+        <button class="btn btn--quiet" type="button" id="finish-button">Stop here and write the report</button>
+        <span class="working" id="answers-working"><span class="spinner" aria-hidden="true"></span>Updating the project file</span>
+        <button class="btn btn--primary" type="submit" id="answers-button">Send answers</button>
+      </div>
+      <p class="form-error" id="answers-error" role="alert"></p>
+    </form>
+    {% else %}
+    <section class="ready panel">
+      <h2>The assistant has what it needs</h2>
+      <p class="muted">{{ answered | length }} round{{ "s" if answered | length != 1 }} of questions answered. The audit searches the official texts, checks the evidence, then runs the AI Act and GDPR analyses. With a local model, expect a few minutes.</p>
+      <button class="btn btn--primary" type="button" id="audit-button">Write the report</button>
+      <p class="form-error" id="audit-error" role="alert"></p>
+    </section>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='js/assessment.js') }}" defer></script>{% endblock %}

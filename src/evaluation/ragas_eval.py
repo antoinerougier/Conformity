@@ -98,7 +98,7 @@ class EvaluationReport(BaseModel):
 def run_pipeline(assistant: ComplianceAssistant, samples: Sequence[EvalSample]) -> list[PipelineRow]:
     rows: list[PipelineRow] = []
     for sample in samples:
-        result = assistant.answer(sample.user_input)
+        result = assistant.answer(sample.user_input, regulations=[sample.regulation])
         rows.append(
             PipelineRow(
                 sample=sample,

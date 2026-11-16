@@ -64,14 +64,14 @@ MIN_PLANNED_QUERIES = 6
 MAX_RECOMMENDATIONS = 12
 
 NODE_LABELS: dict[str, str] = {
-    "parse_document": "📄 Document extraction",
-    "profile_project": "🔎 Project profiling",
-    "plan_queries": "🧭 Query rewriter - legal sub-questions",
-    "retrieve": "📚 Hybrid search + reranking",
-    "rethink": "🤔 Rethinker - evidence assessment",
-    "classify_ai_act": "⚖️ AI Act classification agent",
-    "audit_gdpr": "🔐 GDPR audit agent",
-    "synthesize": "🧾 Synthesis & recommendations agent",
+    "parse_document": "Reading the project document",
+    "profile_project": "Building the project profile",
+    "plan_queries": "Turning the project into legal questions",
+    "retrieve": "Searching the official texts",
+    "rethink": "Checking that the evidence is sufficient",
+    "classify_ai_act": "Classifying the system under the AI Act",
+    "audit_gdpr": "Auditing personal data under the GDPR",
+    "synthesize": "Writing the action plan",
 }
 
 
@@ -184,6 +184,15 @@ def merge_queries(primary: Sequence[SubQuery], extra: Sequence[SubQuery], limit:
     return merged[:limit]
 
 
+def project_block(state: AuditState) -> str:
+    """Project profile plus, when available, the interview transcript."""
+    profile = _require(state.profile, "profile")
+    block = f"PROJECT PROFILE:\n{_dump(profile)}"
+    if state.interview_transcript:
+        block += f"\n\nINTERVIEW WITH THE PROJECT TEAM (authoritative facts):\n{state.interview_transcript}"
+    return block
+
+
 def _evidence_digest(evidence: Sequence[RetrievedChunk], limit: int = 40) -> str:
     lines = []
     for item in deduplicate(evidence)[:limit]:
@@ -237,6 +246,11 @@ class AuditNodes:
 
     # ------------------------------------------------------------------ ingestion
     def parse_document(self, state: AuditState) -> Update:
+        if state.document is not None:  # document provided by the assessment session
+            return {
+                "file_name": state.file_name or state.document.file_name,
+                "trace": [f"Using the assessment context: {len(state.document.sections)} sections"],
+            }
         document = parse_document(Path(state.project_path), max_size_mb=self.s.max_upload_mb)
         return {
             "document": document,
@@ -248,7 +262,11 @@ class AuditNodes:
 
     def profile_project(self, state: AuditState) -> Update:
         document = _require(state.document, "document")
+        if state.profile is not None:  # profile already built during the interview
+            return {"trace": [f"Profile from the interview: {state.profile.project_name}"]}
         content = condense_markdown(document, self.s.project_context_chars)
+        if state.interview_transcript:
+            content += f"\n\nINTERVIEW WITH THE PROJECT TEAM:\n{state.interview_transcript}"
         try:
             profile = self.deps.llm.structured(
                 prompts.PROFILE_SYSTEM, f"PROJECT DOCUMENT:\n\n{content}", ProjectProfile
@@ -272,9 +290,7 @@ class AuditNodes:
         system = prompts.PLANNER_SYSTEM.format(min_q=MIN_PLANNED_QUERIES, max_q=self.s.max_sub_queries)
         errors: list[str] = []
         try:
-            generated = self.deps.llm.structured(
-                system, f"PROJECT PROFILE:\n{_dump(profile)}", QueryPlan
-            ).sub_queries
+            generated = self.deps.llm.structured(system, project_block(state), QueryPlan).sub_queries
         except Exception as exc:  # anchors alone still give a usable plan
             logger.exception("Query planning failed")
             generated, errors = [], [f"Query rewriter: {exc}"]
@@ -299,13 +315,12 @@ class AuditNodes:
         }
 
     def rethink(self, state: AuditState) -> Update:
-        profile = _require(state.profile, "profile")
         coverage = {
             reg: sum(1 for e in state.evidence if e.chunk.metadata.source is reg) for reg in Regulation
         }
         asked = "\n".join(f"- ({q.target.value}) {q.question}" for q in state.query_plan)
         user = (
-            f"PROFILE:\n{_dump(profile)}\n\nSUB-QUESTIONS ALREADY ASKED:\n{asked}\n\n"
+            f"{project_block(state)}\n\nSUB-QUESTIONS ALREADY ASKED:\n{asked}\n\n"
             f"RETRIEVED EVIDENCE:\n{_evidence_digest(state.evidence)}"
         )
         errors: list[str] = []
@@ -364,9 +379,8 @@ class AuditNodes:
         return format_evidence(evidence), evidence
 
     def classify_ai_act(self, state: AuditState) -> Update:
-        profile = _require(state.profile, "profile")
         context, evidence = self._context_block(state, Regulation.AI_ACT)
-        user = f"PROJECT PROFILE:\n{_dump(profile)}\n\nAI ACT EXCERPTS:\n{context}"
+        user = f"{project_block(state)}\n\nAI ACT EXCERPTS:\n{context}"
         errors: list[str] = []
         try:
             draft = self.deps.llm.structured(prompts.AI_ACT_SYSTEM, user, AIActClassificationDraft)
@@ -395,9 +409,8 @@ class AuditNodes:
         }
 
     def audit_gdpr(self, state: AuditState) -> Update:
-        profile = _require(state.profile, "profile")
         context, _ = self._context_block(state, Regulation.GDPR)
-        user = f"PROJECT PROFILE:\n{_dump(profile)}\n\nGDPR EXCERPTS (official French text):\n{context}"
+        user = f"{project_block(state)}\n\nGDPR EXCERPTS (official French text):\n{context}"
         errors: list[str] = []
         try:
             draft = self.deps.llm.structured(prompts.GDPR_SYSTEM, user, GDPRAuditDraft)
@@ -413,10 +426,11 @@ class AuditNodes:
             warnings.extend(finding_warnings)
             findings.append(finding.model_copy(update={"citations": citations}))
         assessment = GDPRAssessment(**draft.model_dump(exclude={"findings"}), findings=findings)
+        dpia = "required" if assessment.dpia_required else "not required"
         return {
             "gdpr": assessment,
             "errors": errors + [f"GDPR - {w}" for w in warnings],
-            "trace": [f"GDPR: {len(findings)} findings, DPIA required = {assessment.dpia_required}"],
+            "trace": [f"GDPR: {len(findings)} findings, DPIA {dpia}"],
         }
 
     # ------------------------------------------------------------------ synthesis
@@ -434,7 +448,7 @@ class AuditNodes:
             for d in deadlines
         )
         user = (
-            f"TODAY: {today.isoformat()}\n\nPROFILE:\n{_dump(profile)}\n\n"
+            f"TODAY: {today.isoformat()}\n\n{project_block(state)}\n\n"
             f"AI ACT CLASSIFICATION:\n{_dump(ai)}\n\nGDPR AUDIT:\n{_dump(gdpr)}\n\n"
             f"APPLICABLE REGULATORY CALENDAR:\n{calendar}"
         )

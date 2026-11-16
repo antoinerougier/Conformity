@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}EU AI Compliance Auditor{% endblock %}
+{% block content %}
+{% set upcoming = deadlines | selectattr("date", "ge", today) | list %}
+<section class="hero">
+  <div>
+    <h1>Know where your AI project stands before you ship it.</h1>
+    <p class="lede">Share your project deck, answer the assistant's questions, and get an audit against the EU AI Act and the GDPR: risk category, obligations, deadlines and a prioritised action plan. Every model runs on this machine.</p>
+    <div class="hero__actions">
+      <a class="btn btn--primary" href="/assessment">Start an assessment</a>
+      <a class="btn btn--quiet" href="/assessment#open-report">Open a saved report</a>
+    </div>
+  </div>
+  <aside class="clock" aria-labelledby="clock-title">
+    <h2 id="clock-title">Coming into application</h2>
+    <ol>
+      {% for d in upcoming[:4] %}
+      <li>
+        <p class="when"><strong>{{ d.date.strftime("%d %b") }}</strong><span>{{ d.date.year }}</span><span>in {{ d.days_remaining(today) }} days</span></p>
+        <p class="what">{{ d.title }}<em>{{ d.legal_basis }}</em></p>
+      </li>
+      {% else %}
+      <li><p class="what">Every provision now applies.</p></li>
+      {% endfor %}
+    </ol>
+  </aside>
+</section>
+
+<section class="section" aria-labelledby="calendar-title">
+  <header>
+    <div>
+      <h2 id="calendar-title">The regulatory calendar</h2>
+      <p>When each set of obligations applies. AI Act dates include the postponements of Regulation (EU) 2026/1744 ("Digital Omnibus on AI"); the GDPR has applied in full since 25 May 2018. Hover a point for details.</p>
+    </div>
+    <div class="timeline-legend" aria-hidden="true">
+      <span><i></i>AI Act</span><span><i class="amended"></i>Amended in 2026</span>
+    </div>
+  </header>
+  <div class="timeline" role="img" aria-label="Timeline of application dates from {{ timeline_start.year }} to {{ timeline_end.year }}">
+    <div class="timeline__axis">
+      {% for year, pos in year_marks %}<span class="timeline__year" style="left: {{ pos }}%">{{ year }}</span>{% endfor %}
+      {% for d in timeline_deadlines %}
+      <span class="timeline__pin" tabindex="0" data-reg="{{ d.regulation.value }}" data-amended="{{ 'true' if d.amended_by else 'false' }}" style="left: {{ timeline_position(d.date, timeline_start, timeline_end) | round(2) }}%">
+        <span class="tip"><strong>{{ d.date | fdate }}</strong><br>{{ d.title }}</span>
+      </span>
+      {% endfor %}
+      <span class="timeline__today" style="left: {{ timeline_position(today, timeline_start, timeline_end) | round(2) }}%"><span>Today</span></span>
+    </div>
+  </div>
+  <table class="deadline-table">
+    <thead><tr><th scope="col">Date</th><th scope="col">What applies</th><th scope="col">Legal basis</th><th scope="col">Status</th></tr></thead>
+    <tbody>
+      {% for d in deadlines %}
+      <tr>
+        <td>{{ d.date | fdate }}</td>
+        <td>{{ d.title }}{% if d.amended_by %} <span class="tag" data-tone="medium">Amended</span>{% endif %}</td>
+        <td class="cite">{{ d.legal_basis }}</td>
+        <td>{% if d.is_past(today) %}<span class="tag" data-tone="neutral">Applies</span>{% else %}<span class="tag" data-tone="high">In {{ d.days_remaining(today) }} days</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="section" aria-labelledby="how-title">
+  <header><div><h2 id="how-title">How an assessment works</h2></div></header>
+  <ol class="how">
+    <li>
+      <h3>Share your project</h3>
+      <p>Upload the deck or document that describes the system (.pdf or .pptx), or describe it in your own words. The file is read and deleted immediately.</p>
+    </li>
+    <li>
+      <h3>Answer the assistant</h3>
+      <p>The assistant asks what the document does not say: who decides, which data, which model, which safeguards. Up to {{ settings.max_interview_rounds }} short rounds.</p>
+    </li>
+    <li>
+      <h3>Act on the report</h3>
+      <p>Risk category, applicable articles, exact deadlines, GDPR findings and a prioritised plan, every point traced to the legal text. Export it as PDF or JSON.</p>
+    </li>
+  </ol>
+</section>
+
+<section class="section" aria-labelledby="engine-title">
+  <header><div><h2 id="engine-title">Under the hood</h2><p>Retrieval over the official texts, a critic that sends the search back when evidence is thin, and two specialised agents working in parallel.</p></div></header>
+  <div class="engine">
+    <div>
+      <ol class="flow" aria-label="Audit pipeline">
+        <li>Your document and answers</li><li class="arrow" aria-hidden="true">›</li>
+        <li>Legal questions</li><li class="arrow" aria-hidden="true">›</li>
+        <li>Hybrid search + reranking</li><li class="arrow" aria-hidden="true">›</li>
+        <li data-kind="loop">Critic (up to {{ settings.max_rethink_iterations }} retries)</li><li class="arrow" aria-hidden="true">›</li>
+        <li>AI Act agent + GDPR agent</li><li class="arrow" aria-hidden="true">›</li>
+        <li>Report</li>
+      </ol>
+      <dl>
+        <dt>Language model</dt><dd>{{ settings.llm_model }} via Ollama</dd>
+        <dt>Embeddings</dt><dd>{{ settings.embedding_model }}</dd>
+        <dt>Legal corpus</dt><dd>Regulation (EU) 2024/1689 (EN) and Regulation (EU) 2016/679 (FR), split by article and annex</dd>
+        <dt>Guardrails</dt><dd>Deadlines and score computed by code; every cited article checked against the corpus</dd>
+      </dl>
+    </div>
+    <div class="panel" aria-labelledby="status-title">
+      <h3 id="status-title">System status</h3>
+      <ul class="health-list" id="health-list" aria-live="polite">
+        <li><span>Language model</span><span class="muted" data-health="ollama">Checking</span></li>
+        <li><span>Legal index</span><span class="muted" data-health="store">Checking</span></li>
+        <li><span>Reranker</span><span class="muted" data-health="reranker">Checking</span></li>
+      </ul>
+      <button class="btn btn--quiet" type="button" id="reindex">Rebuild the legal index</button>
+      <p class="muted" id="reindex-status" role="status" style="margin-top: 0.75rem; font-size: 0.875rem;"></p>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='js/overview.js') }}" defer></script>{% endblock %}

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Application entrypoint: waits for Qdrant & Ollama, indexes the legal corpus when the
-# collection is empty (AUTO_INDEX=true), then runs the command (Streamlit by default).
+# collection is empty (AUTO_INDEX=true), then runs the command (the FastAPI server by default).
 set -euo pipefail
 
 QDRANT_URL="${QDRANT_URL:-http://qdrant:6333}"
@@ -28,7 +28,7 @@ wait_for "Ollama" "${OLLAMA_BASE_URL%/}/api/tags"
 if [ "${AUTO_INDEX}" = "true" ]; then
   echo "[entrypoint] Indexing the legal corpus (skipped if already present)..."
   python -m src.rag.preprocess_laws --index --if-empty || {
-    echo "[entrypoint] WARNING: indexing failed - run it again from the Overview page." >&2
+    echo "[entrypoint] WARNING: indexing failed - rebuild it from the Overview page." >&2
   }
 fi
 

@@ -24,7 +24,7 @@ repos:
         types: [python]
       - id: mypy
         name: mypy (strict)
-        entry: uv run mypy src app.py pages tests
+        entry: uv run mypy src tests scripts
         language: system
         types: [python]
         pass_filenames: false

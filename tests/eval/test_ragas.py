@@ -23,7 +23,9 @@ from src.evaluation.dataset import load_testset
 from src.evaluation.ragas_eval import EvaluationReport, evaluate_rows, run_pipeline
 from src.rag.retriever import build_retriever
 
-pytestmark = pytest.mark.eval
+# The judge runs on CPU in CI: allow far more than the 600 s default of unit tests.
+EVAL_TIMEOUT_S = int(os.getenv("RAGAS_TIMEOUT_S", "5400"))
+pytestmark = [pytest.mark.eval, pytest.mark.timeout(EVAL_TIMEOUT_S)]
 
 REPORTS_DIR = Path(__file__).parent / "reports"
 MIN_REFERENCE_HIT_RATE = 0.70
@@ -62,6 +64,7 @@ def evaluation(settings: Settings) -> EvaluationReport:
         retriever=retriever,
         validator=CitationValidator.from_corpus(retriever.bm25.chunks),
         settings=settings,
+        per_regulation_top_n=settings.ragas_context_top_n,
     )
     report = evaluate_rows(run_pipeline(assistant, samples), settings)
     path = report.save(REPORTS_DIR)

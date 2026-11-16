@@ -298,6 +298,7 @@ class _ReportBuilder:
     def checklist(self) -> None:
         self._p("6. Compliance checklist", "H1")
         rows: list[Row] = [_header(["", "Action", "Reference", "Priority", "Due"], self.ss)]
+        today = self.r.generated_at.date()
         completed = 0
         for item in self.r.checklist:
             checked = self.done.get(item.item_id, item.done)
@@ -308,7 +309,7 @@ class _ReportBuilder:
                     item.label,
                     f"{item.regulation.short}, {item.reference}",
                     item.priority.value,
-                    _fmt_date(item.due_date),
+                    "Applies now" if item.due_date and item.due_date <= today else _fmt_date(item.due_date),
                 ]
             )
         self.story.append(_table(rows, [1 * cm, 8.4 * cm, 4 * cm, 1.6 * cm, self.width - 15 * cm], self.ss))

@@ -192,9 +192,10 @@ class TestScoring:
             Regulation.GDPR, Priority.P1, RiskCategory.HIGH_RISK, today=today
         ) == date(2028, 1, 30)
 
-    def test_llm_output_schema_rejects_out_of_range_confidence(self) -> None:
+    def test_llm_output_schema_rejects_invalid_confidence(self) -> None:
+        assert _ai(confidence=1.5).confidence == pytest.approx(0.15)  # 0-10 scale normalised
         with pytest.raises(ValidationError):
-            _ai(confidence=1.5)
+            _ai(confidence="high")
         with pytest.raises(ValidationError):
             _ai(unexpected_field=True)  # extra="forbid"
 

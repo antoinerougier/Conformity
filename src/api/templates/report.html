@@ -1,0 +1,257 @@
+{% extends "base.html" %}
+{% block title %}{% if report %}{{ report.profile.project_name }} - Audit report{% else %}Writing the report{% endif %}{% endblock %}
+{% block content %}
+{% if not report %}
+{# ------------------------------------------------------------------ progress #}
+<section class="progress-view" data-session="{{ session.session_id }}" data-status="{{ session.status }}">
+  {% if session.status == "failed" %}
+  <h1>The audit stopped</h1>
+  <p class="notice" data-tone="critical">{{ session.error or "Unknown error." }}</p>
+  <p class="muted">Check that Ollama is running and the legal index is built (Overview page), then try again.</p>
+  <a class="btn btn--quiet" href="/assessment/{{ session.session_id }}">Back to the assessment</a>
+  {% else %}
+  <h1>Writing the report</h1>
+  <p class="muted">The agents are working through the official texts. This page updates as each step finishes and opens the report when it is ready.</p>
+  <ol class="progress-list" id="progress-list" aria-live="polite">
+    {% for entry in session.progress %}
+    <li data-state="done"><strong>{{ entry.label }}</strong>{% for t in entry.trace %}<small>{{ t }}</small>{% endfor %}</li>
+    {% endfor %}
+    <li data-state="running" id="progress-running"><strong>Working</strong><small>Waiting for the next step</small></li>
+  </ol>
+  {% endif %}
+</section>
+{% else %}
+{# ------------------------------------------------------------------ report #}
+{% set ai = report.ai_act %}{% set g = report.gdpr %}
+{% set tone = risk_tone[ai.risk_category] %}
+{% set upcoming = ai.applicable_deadlines | selectattr("date", "ge", today) | list %}
+{% set p0 = report.recommendations | selectattr("priority.value", "equalto", "P0") | list %}
+<section class="verdict" data-tone="{{ tone }}" aria-labelledby="verdict-title">
+  <div class="verdict__inner">
+    <div>
+      <p class="verdict__project">{{ report.profile.project_name }}, audited {{ report.generated_at.date() | fdate }}</p>
+      <h1 class="verdict__category" id="verdict-title">{{ ai.risk_category.label }}</h1>
+      <p class="verdict__basis">{{ ai.justification | truncate(360) }}</p>
+      <dl class="verdict__facts">
+        <div><dt>Your role</dt><dd>{{ ai.operator_role.value | capitalize }}</dd></div>
+        <div><dt>Next deadline</dt><dd>{% if upcoming %}{{ upcoming[0].date | fdate }}{% else %}All obligations apply{% endif %}</dd></div>
+        <div><dt>DPIA</dt><dd>{{ "Required" if g.dpia_required else "Not required" }}</dd></div>
+        <div><dt>Blocking actions</dt><dd>{{ p0 | length }}</dd></div>
+      </dl>
+      <div class="verdict__actions">
+        <a class="btn btn--on-dark" href="/api/sessions/{{ session.session_id }}/report.pdf">Download PDF</a>
+        <a class="btn btn--on-dark" href="/api/sessions/{{ session.session_id }}/report.json">Download JSON</a>
+      </div>
+    </div>
+    {% set circ = 326.73 %}
+    <figure class="dial" aria-label="Compliance score {{ report.compliance_score }} out of 100">
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="9"/>
+        <circle cx="60" cy="60" r="52" fill="none" stroke="var(--tone)" stroke-width="9" stroke-linecap="round"
+                stroke-dasharray="{{ (circ * report.compliance_score / 100) | round(2) }} {{ circ }}" transform="rotate(-90 60 60)"/>
+        <text x="60" y="64" text-anchor="middle" class="value">{{ report.compliance_score }}</text>
+        <text x="60" y="84" text-anchor="middle" class="unit">out of 100</text>
+      </svg>
+      <figcaption><p>{{ report.compliance_level }} compliance</p></figcaption>
+    </figure>
+  </div>
+</section>
+
+<div class="report-layout">
+  <nav class="toc" aria-label="Report sections">
+    <ol>
+      <li><a href="#summary">Summary</a></li>
+      <li><a href="#ai-act">AI Act</a></li>
+      <li><a href="#gdpr">GDPR</a></li>
+      <li><a href="#plan">Action plan</a></li>
+      <li><a href="#checklist">Checklist</a></li>
+      <li><a href="#evidence">Legal sources</a></li>
+      {% if report.warnings %}<li><a href="#quality">Quality checks</a></li>{% endif %}
+    </ol>
+  </nav>
+
+  <div>
+    <section class="report-section" id="summary">
+      <h2>Summary</h2>
+      <p class="prose">{{ report.executive_summary }}</p>
+      {% if report.key_risks %}<ul class="risks">{% for r in report.key_risks %}<li>{{ r }}</li>{% endfor %}</ul>{% endif %}
+    </section>
+
+    <section class="report-section" id="ai-act">
+      <h2>AI Act classification</h2>
+      {% if ai.prohibited_practice_flags %}
+      <div class="notice" data-tone="critical" style="margin-bottom: 1.25rem;">
+        <strong>Prohibited practices identified</strong>
+        <ul style="margin: 0.4rem 0 0; padding-left: 1.1rem;">{% for f in ai.prohibited_practice_flags %}<li>{{ f }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+      <p class="prose">{{ ai.justification }}</p>
+      <p class="muted">
+        {% if ai.secondary_categories %}Also concerned: {{ ai.secondary_categories | map(attribute="label") | join(", ") }}. {% endif %}
+        {% if ai.annex_iii_areas %}Annex III areas: {{ ai.annex_iii_areas | join(", ") }}. {% endif %}
+        Confidence of the classification: {{ (ai.confidence * 100) | round | int }}%.
+      </p>
+
+      {% if ai.obligations %}
+      <h3 class="subhead">Obligations</h3>
+      <table class="data-table">
+        <thead><tr><th scope="col">Article</th><th scope="col">Obligation and gap</th><th scope="col">Status</th></tr></thead>
+        <tbody>
+          {% for o in ai.obligations %}
+          <tr>
+            <td class="cite">{{ o.reference }}</td>
+            <td><span class="action-title">{{ o.description }}</span>{% if o.gap %}<span class="muted">{{ o.gap }}</span>{% endif %}</td>
+            <td><span class="tag" data-tone="{{ status_tone[o.status] }}">{{ o.status.label }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      <h3 class="subhead">When it applies</h3>
+      <table class="data-table">
+        <thead><tr><th scope="col">Date</th><th scope="col">Obligations</th><th scope="col">Status</th></tr></thead>
+        <tbody>
+          {% for d in ai.applicable_deadlines %}
+          <tr>
+            <td class="num">{{ d.date | fdate }}</td>
+            <td><span class="action-title">{{ d.title }}</span><span class="cite">{{ d.legal_basis }}</span>{% if d.amended_by %} <span class="tag" data-tone="medium">Amended</span>{% endif %}</td>
+            <td>{% if d.is_past(today) %}<span class="tag" data-tone="neutral">Applies</span>{% else %}<span class="tag" data-tone="high">In {{ d.days_remaining(today) }} days</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      {% if ai.citations %}
+      <h3 class="subhead">Provisions relied on</h3>
+      <p>{% for c in ai.citations %}<span class="tag" data-tone="{{ 'low' if c.verified else 'neutral' }}" title="{{ 'Found in the retrieved evidence' if c.verified else 'Not found in the retrieved evidence: verify' }}">{{ c.reference }}</span> {% endfor %}</p>
+      {% endif %}
+    </section>
+
+    <section class="report-section" id="gdpr">
+      <h2>GDPR assessment</h2>
+      <div class="gdpr-grid">
+        <article data-tone="{{ status_tone[g.legal_basis_status] }}">
+          <h3>Lawful basis <span class="tag" data-tone="{{ status_tone[g.legal_basis_status] }}">{{ g.legal_basis_status.label }}</span></h3>
+          <p><span class="cite">Art. 6</span> {{ g.identified_legal_basis.value | replace("_", " ") | capitalize }}. {{ g.legal_basis_assessment }}</p>
+        </article>
+        <article data-tone="{{ status_tone[g.minimisation_status] }}">
+          <h3>Minimisation and retention <span class="tag" data-tone="{{ status_tone[g.minimisation_status] }}">{{ g.minimisation_status.label }}</span></h3>
+          <p><span class="cite">Art. 5</span> {{ g.minimisation_assessment }}</p>
+        </article>
+        <article data-tone="{{ status_tone[g.dpia_status] }}">
+          <h3>Impact assessment <span class="tag" data-tone="{{ status_tone[g.dpia_status] }}">{{ g.dpia_status.label }}</span></h3>
+          <p><span class="cite">Art. 35</span> {% if g.dpia_required %}Required: {{ g.dpia_triggers | join("; ") or "high-risk processing" }}.{% else %}Not required on the facts provided.{% endif %}</p>
+        </article>
+        <article data-tone="{{ status_tone[g.rights_status] }}">
+          <h3>Data subject rights <span class="tag" data-tone="{{ status_tone[g.rights_status] }}">{{ g.rights_status.label }}</span></h3>
+          <p><span class="cite">Art. 12-22</span> {{ g.rights_assessment }}</p>
+        </article>
+      </div>
+      {% if g.findings %}
+      <h3 class="subhead">Findings</h3>
+      <div class="findings">
+        {% for f in g.findings %}
+        <article class="finding" data-tone="{{ status_tone[f.status] }}">
+          <header>
+            <strong>{{ f.topic | replace("_", " ") | capitalize }}</strong>
+            <span class="tag" data-tone="{{ status_tone[f.status] }}">{{ f.status.label }}</span>
+            <span class="tag" data-tone="{{ {'critical': 'critical', 'high': 'high', 'medium': 'medium', 'low': 'low'}[f.severity.value] }}">{{ f.severity.value | capitalize }} severity</span>
+            {% for c in f.citations %}<span class="cite">{{ c.regulation.short }}, {{ c.reference }}</span>{% endfor %}
+          </header>
+          <p>{{ f.finding }}</p>
+          <p class="reco">{{ f.recommendation }}</p>
+        </article>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+
+    <section class="report-section" id="plan">
+      <h2>Action plan</h2>
+      <table class="data-table">
+        <thead><tr><th scope="col">Priority</th><th scope="col">Action</th><th scope="col">Basis</th><th scope="col">Due</th></tr></thead>
+        <tbody>
+          {% for r in report.recommendations %}
+          <tr>
+            <td><span class="tag" data-tone="{{ priority_tone[r.priority] }}">{{ r.priority.label }}</span></td>
+            <td><span class="action-title">{{ r.title }}</span><span class="muted">{{ r.description }}</span></td>
+            <td><span class="cite">{{ r.regulation.short }}{% if r.references %}, {{ r.references | join(", ") }}{% endif %}</span></td>
+            <td class="num" style="white-space: nowrap">{{ r.due_date | fdate }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section class="report-section" id="checklist" data-session="{{ session.session_id }}">
+      <h2>Compliance checklist</h2>
+      {% set total = report.checklist | length %}
+      {% set done = checklist_done %}
+      <div class="checklist-progress">
+        <div class="bar" aria-hidden="true"><span id="checklist-bar" style="width: {{ (100 * done / total) | round(1) if total else 0 }}%"></span></div>
+        <span id="checklist-count" class="num" aria-live="polite">{{ done }} of {{ total }} done</span>
+      </div>
+      {% for priority, items in report.checklist | groupby("priority.value") %}
+      <div class="checklist-group">
+        <h3><span class="tag" data-tone="{{ {'P0': 'critical', 'P1': 'high', 'P2': 'medium', 'P3': 'low'}[priority] }}">{{ priority }}</span>{{ {"P0": "Blocking", "P1": "Before the next deadline", "P2": "Important", "P3": "Improvements"}[priority] }}</h3>
+        {% for item in items %}
+        <div class="check">
+          <input type="checkbox" id="chk-{{ item.item_id }}" data-item="{{ item.item_id }}" {% if checklist_state.get(item.item_id, item.done) %}checked{% endif %}>
+          <label for="chk-{{ item.item_id }}">{{ item.label }} <span class="cite">{{ item.regulation.short }}, {{ item.reference }}</span></label>
+          <span class="due">{% if item.due_date and item.due_date <= today %}Applies now{% else %}{{ item.due_date | fdate }}{% endif %}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endfor %}
+    </section>
+
+    <section class="report-section evidence" id="evidence">
+      <h2>Legal sources</h2>
+      <p class="muted">The excerpts of the official texts the agents worked from, best match first.</p>
+      {% for e in report.evidence[:30] %}
+      <details>
+        <summary><span class="cite">{{ e.citation }}</span><span>{{ e.title }}</span></summary>
+        <blockquote>{{ e.excerpt }}{% if e.excerpt | length >= 400 %}...{% endif %}</blockquote>
+      </details>
+      {% endfor %}
+    </section>
+
+    {% if report.warnings %}
+    <section class="report-section" id="quality">
+      <h2>Quality checks</h2>
+      <p class="muted">Automatic checks on the agents' output. A citation flagged here should be verified before you rely on it.</p>
+      <ul>{% for w in report.warnings %}<li class="muted" style="font-size: 0.875rem">{{ w }}</li>{% endfor %}</ul>
+    </section>
+    {% endif %}
+    <p class="muted" style="font-size: 0.875rem">{{ report.disclaimer }}</p>
+  </div>
+</div>
+
+<button class="btn btn--primary chat-toggle" type="button" id="chat-toggle" aria-controls="chat" aria-expanded="false">Ask about this report</button>
+<aside class="chat" id="chat" data-open="false" aria-labelledby="chat-title" data-session="{{ session.session_id }}">
+  <header>
+    <h2 id="chat-title">Ask about this report</h2>
+    <button class="btn btn--quiet" type="button" id="chat-close">Close</button>
+  </header>
+  <div class="chat__log" id="chat-log" aria-live="polite">
+    {% for turn in session.chat_history %}
+    <div class="msg msg--{{ turn.role }}">{{ turn.content }}{% if turn.citations %}<span class="sources">Sources: {{ turn.citations | join(", ") }}</span>{% endif %}</div>
+    {% else %}
+    <div class="chat__empty" id="chat-empty">
+      Answers rely on this report and the official texts.
+      <button type="button" data-suggest>Which actions should we take first, and why?</button>
+      <button type="button" data-suggest>What exactly does human oversight require for us?</button>
+      <button type="button" data-suggest>Do we need a DPIA, and what should it cover?</button>
+    </div>
+    {% endfor %}
+  </div>
+  <form id="chat-form">
+    <label for="chat-input" class="visually-hidden">Your question</label>
+    <textarea id="chat-input" rows="1" placeholder="Ask a question" required></textarea>
+    <button class="btn btn--primary" type="submit">Send</button>
+  </form>
+</aside>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='js/report.js') }}" defer></script>{% endblock %}

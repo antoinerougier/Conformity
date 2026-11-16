@@ -1,6 +1,6 @@
 [project]
 name = "eu-ai-compliance-auditor"
-version = "1.0.0"
+version = "2.0.0"
 description = "Local, privacy-by-design compliance audit of AI projects against the EU AI Act and the GDPR (hybrid RAG + reranker + rethinker, LangGraph agents, Ragas evaluation)."
 readme = "README.md"
 license = { text = "MIT" }
@@ -35,10 +35,11 @@ dependencies = [
     "pydantic>=2.9,<3",
     "pydantic-settings>=2.6",
     "httpx>=0.27",
-    # UI & export
-    "streamlit>=1.40",
-    "plotly>=5.24",
-    "pandas>=2.2",
+    # Web application & export
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.12",
     "reportlab>=4.2",
 ]
 
@@ -57,7 +58,7 @@ dev = [
     "pytest-timeout>=2.3",
     "mypy>=1.13",
     "ruff>=0.8",
-    "pandas-stubs>=2.2",
+    "playwright>=1.48",
     "types-reportlab>=4.2",
     "pre-commit>=4.0",
 ]
@@ -113,7 +114,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "PLR", "N802"]
-"pages/**" = ["N999"]
+"scripts/**" = ["E501"]  # long prose strings (example document content)
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
@@ -139,7 +140,6 @@ module = [
     "pymupdf4llm.*",
     "fitz.*",
     "pptx.*",
-    "plotly.*",
     "ragas.*",
     "sentence_transformers.*",
     "datasets.*",
@@ -156,6 +156,7 @@ warn_required_dynamic_aliases = true
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-ra --strict-markers -m 'not eval'"
 markers = [
     "eval: Ragas evaluation (requires Ollama + Qdrant index) - `pytest -m eval tests/eval`",

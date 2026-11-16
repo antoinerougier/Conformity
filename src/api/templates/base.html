@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}EU AI Compliance Auditor{% endblock %}</title>
+  <meta name="description" content="Local compliance audit of AI projects against the EU AI Act and the GDPR.">
+  <link rel="icon" href="{{ url_for('static', path='img/mark.svg') }}" type="image/svg+xml">
+  <link rel="preload" href="{{ url_for('static', path='fonts/ibm-plex-sans-latin-400-normal.woff2') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+</head>
+<body data-page="{{ page }}">
+  <a class="visually-hidden" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="wordmark" href="/">
+        <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">
+          <rect width="32" height="32" rx="7" fill="#14233b"/>
+          <path d="M16 7v18M9 11h14M9 11l-3.2 7h6.4zM23 11l-3.2 7h6.4z" stroke="#fff" stroke-width="1.6" fill="none" stroke-linejoin="round"/>
+          <path d="M11 25h10" stroke="#e3a92b" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span>EU AI Compliance Auditor<small>AI Act &amp; GDPR, on your machine</small></span>
+      </a>
+      {% set sid = session.session_id if session is defined and session else None %}
+      <nav aria-label="Assessment steps">
+        <ol class="steps">
+          <li><a href="/" {% if page == 'overview' %}aria-current="step"{% endif %}>Overview</a></li>
+          <li>{% if sid %}<a href="/assessment/{{ sid }}" {% if page == 'assessment' %}aria-current="step"{% endif %}>Assessment</a>{% else %}<a href="/assessment" {% if page == 'assessment' %}aria-current="step"{% endif %}>Assessment</a>{% endif %}</li>
+          <li>{% if sid and session.report %}<a href="/report/{{ sid }}" {% if page == 'report' %}aria-current="step"{% endif %}>Report</a>{% else %}<span {% if page == 'report' %}aria-current="step"{% endif %}>Report</span>{% endif %}</li>
+        </ol>
+      </nav>
+      <p class="status-pill" id="status-pill" data-state="unknown" role="status"><i></i><span>Checking services</span></p>
+    </div>
+  </header>
+  <main id="main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="site-footer">
+    <div>Runs entirely on your machine. A decision-support tool: it does not replace advice from a lawyer or your Data Protection Officer.</div>
+  </footer>
+  <script src="{{ url_for('static', path='js/common.js') }}" defer></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

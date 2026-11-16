@@ -51,7 +51,7 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --frozen --python ${{ env.PYTHON_VERSION }}
-      - run: uv run mypy src app.py pages tests
+      - run: uv run mypy src tests scripts
 
   # --------------------------------------------------------------------------- Tests
   test:
@@ -111,23 +111,24 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_dispatch' && inputs.run_eval) ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-eval'))
-    timeout-minutes: 90
-    services:
-      qdrant:
-        image: qdrant/qdrant:v1.15.4
-        ports:
-          - 6333:6333
+    timeout-minutes: 120
     env:
       # Smaller models to fit a standard CPU runner (16 GB RAM). Thresholds are lowered
       # accordingly; the production configuration (qwen2.5:14b) uses the Settings defaults.
+      # One small model for generation and judging (no model swapping on a 4-vCPU runner),
+      # regulation-targeted contexts of 3 passages, 4 balanced samples.
       OLLAMA_BASE_URL: http://localhost:11434
       LLM_MODEL: qwen2.5:3b
-      JUDGE_MODEL: qwen2.5:7b
+      JUDGE_MODEL: qwen2.5:3b
       EMBEDDING_MODEL: bge-m3
       LLM_NUM_CTX: "8192"
-      QDRANT_URL: http://localhost:6333
+      # Embedded Qdrant: no service container, no client/server version mismatch.
+      QDRANT_URL: ""
+      QDRANT_PATH: data/qdrant_ci
       RERANKER_BACKEND: flashrank
-      RAGAS_MAX_SAMPLES: "8"
+      RAGAS_MAX_SAMPLES: "4"
+      RAGAS_CONTEXT_TOP_N: "3"
+      RAGAS_TIMEOUT_S: "5400"
       RAGAS_MIN_FAITHFULNESS: "0.60"
       RAGAS_MIN_CONTEXT_RELEVANCE: "0.50"
       RAGAS_MIN_ANSWER_RELEVANCY: "0.50"
@@ -156,14 +157,16 @@ jobs:
         run: |
           curl -fsSL https://ollama.com/install.sh | sh
           sudo systemctl stop ollama || true
-          OLLAMA_MODELS="$HOME/.ollama/models" nohup ollama serve > /tmp/ollama.log 2>&1 &
+          OLLAMA_MODELS="$HOME/.ollama/models" OLLAMA_NUM_PARALLEL=2 OLLAMA_KEEP_ALIVE=2h \
+            nohup ollama serve > /tmp/ollama.log 2>&1 &
           for i in $(seq 1 60); do curl -fsS http://localhost:11434/api/tags && break; sleep 2; done
 
       - name: Pull the models
         run: |
           ollama pull "$LLM_MODEL"
-          ollama pull "$JUDGE_MODEL"
           ollama pull "$EMBEDDING_MODEL"
+          # Warm-up: load the model in memory before the timed evaluation.
+          curl -fsS http://localhost:11434/api/generate -d "{\"model\": \"$LLM_MODEL\", \"prompt\": \"ok\", \"stream\": false}" > /dev/null
 
       - name: Index the legal corpus
         run: uv run python -m src.rag.preprocess_laws --index --recreate

@@ -76,17 +76,23 @@ class Settings(BaseSettings):
     max_sub_queries: int = Field(default=10, ge=2, le=30)
     project_context_chars: int = Field(default=24000, ge=2000)
     evidence_context_chars: int = Field(default=18000, ge=2000)
+    max_interview_rounds: int = Field(default=3, ge=1, le=6)
+    max_questions_per_round: int = Field(default=5, ge=1, le=8)
+
+    # ------------------------------------------------------------------ Web application
+    session_ttl_hours: int = Field(default=24, ge=1)
+    max_sessions: int = Field(default=200, ge=1)
 
     # ------------------------------------------------------------------ Ingestion
     max_upload_mb: int = Field(default=50, ge=1, le=500)
     uploads_dir: Path = PROJECT_ROOT / "data" / "uploads"
-    reports_dir: Path = PROJECT_ROOT / "data" / "reports"
 
     # ------------------------------------------------------------------ Ragas evaluation
     ragas_min_faithfulness: float = Field(default=0.70, ge=0.0, le=1.0)
     ragas_min_context_relevance: float = Field(default=0.60, ge=0.0, le=1.0)
     ragas_min_answer_relevancy: float = Field(default=0.60, ge=0.0, le=1.0)
     ragas_max_samples: int = Field(default=20, ge=1)
+    ragas_context_top_n: int = Field(default=4, ge=1, le=10)
     ragas_testset_path: Path = PROJECT_ROOT / "tests" / "eval" / "data" / "golden_testset.jsonl"
     ragas_synthetic_testset_path: Path = PROJECT_ROOT / "tests" / "eval" / "data" / "synthetic_testset.jsonl"
 

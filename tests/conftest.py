@@ -124,7 +124,6 @@ def settings(tmp_path: Path) -> Settings:
         qdrant_collection="test_corpus",
         reranker_backend=RerankerBackend.NONE,
         uploads_dir=tmp_path / "uploads",
-        reports_dir=tmp_path / "reports",
         max_rethink_iterations=2,
     )
 

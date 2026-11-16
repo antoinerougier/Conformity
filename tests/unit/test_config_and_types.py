@@ -40,3 +40,24 @@ def test_api_key_is_secret() -> None:
     assert "s3cr3t" not in repr(s)
     assert s.qdrant_api_key is not None
     assert s.qdrant_api_key.get_secret_value() == "s3cr3t"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"), [(0.8, 0.8), (3, 0.3), (85, 0.85), ("85%", 0.85), (100, 1.0), (250, 1.0)]
+)
+def test_llm_confidence_scales_are_normalised(raw: object, expected: float) -> None:
+    from src.models.schemas import AIActClassificationDraft
+
+    draft = AIActClassificationDraft.model_validate(
+        {"is_ai_system": True, "risk_category": "minimal_risk", "justification": "x", "confidence": raw}
+    )
+    assert draft.confidence == pytest.approx(expected)
+
+
+def test_llm_enum_spellings_are_normalised() -> None:
+    from src.models.schemas import ComplianceStatus, RiskCategory
+
+    assert RiskCategory("High-risk") is RiskCategory.HIGH_RISK
+    assert ComplianceStatus("Partially compliant") is ComplianceStatus.PARTIALLY_COMPLIANT
+    with pytest.raises(ValueError):
+        RiskCategory("dangerous")

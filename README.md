@@ -6,6 +6,7 @@
 
 [![CI](https://github.com/OWNER/eu-ai-compliance-auditor/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/eu-ai-compliance-auditor/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
+![FastAPI](https://img.shields.io/badge/web-FastAPI-009688)
 ![uv](https://img.shields.io/badge/deps-uv-6340ac)
 ![Ruff](https://img.shields.io/badge/lint-ruff-d7ff64)
 ![mypy](https://img.shields.io/badge/types-mypy%20strict-2a6db2)
@@ -17,25 +18,16 @@
 
 </div>
 
-**EU AI Compliance Auditor** is a fully local multi-agent RAG application that audits an AI
-project (PDF or PowerPoint) against the EU AI Act and the GDPR. It determines the project's
-risk category, its applicable obligations and exact deadlines, and delivers a prioritised,
-source-cited action plan. LLMs, embeddings and the vector database all run on your machine.
+> Replace `OWNER` in the CI badge URL with your GitHub user or organisation.
 
-Upload a project presentation (`.pdf` or `.pptx`) and the application:
+**EU AI Compliance Auditor** is a fully local multi-agent RAG application that audits an AI project
+against the EU AI Act and the GDPR. You share the project's deck. An AI assistant then interviews you
+about what the document leaves out. Finally, LangGraph agents grounded in the official legal texts
+write a report: the risk category, the applicable obligations with their exact deadlines, and a
+prioritised action plan in which every point cites its source. LLMs, embeddings and the vector
+database all run on your machine.
 
-- identifies the **AI Act risk category**;
-- lists the **applicable obligations and exact deadlines**, including the postponements
-  introduced by Regulation (EU) **2026/1744 ("Digital Omnibus on AI")**;
-- audits the processing of personal data under the **GDPR** (lawful basis, minimisation, DPIA,
-  data subject rights);
-- produces a **prioritised action plan**, an **interactive checklist** and a **PDF/JSON report**.
-
-A contextual **chatbot** then helps the team improve the project.
-
-Everything runs **locally**: LLM and embeddings through Ollama, the Qdrant vector database
-and an ONNX reranker on CPU. No document ever leaves the machine, and the audited file is
-deleted at the end of the analysis.
+![Audit report](docs/screenshots/07-report.png)
 
 > ⚠️ Decision-support tool. It does not constitute legal advice.
 
@@ -43,15 +35,86 @@ deleted at the end of the analysis.
 
 ## Contents
 
+- [A walk through an assessment](#a-walk-through-an-assessment)
 - [Architecture](#architecture)
-- [Key features](#key-features)
 - [Quick start (Docker)](#quick-start-docker)
 - [Local installation (uv)](#local-installation-uv)
+- [Try it without Ollama](#try-it-without-ollama)
 - [Configuration](#configuration)
+- [HTTP API](#http-api)
 - [Code quality](#code-quality)
 - [Testing & evaluation](#testing--evaluation)
 - [Repository layout](#repository-layout)
 - [Known limitations](#known-limitations)
+
+## A walk through an assessment
+
+The screenshots below follow the fictitious project `examples/workpulse360_high_risk_project.pdf`:
+a workforce-analytics product that monitors employees' emotions and scores their loyalty.
+
+### 1. Overview: where the regulation stands today
+
+The home page shows which obligations come into application next, the full regulatory calendar
+(AI Act dates as amended by Regulation (EU) 2026/1744, plus the GDPR), and the health of the local
+services. From here you can rebuild the legal index.
+
+![Overview](docs/screenshots/01-overview.png)
+
+![Regulatory calendar](docs/screenshots/02-calendar.png)
+
+### 2. Assessment: share the project, then answer the assistant
+
+Upload the deck (`.pdf` or `.pptx`), add any context it leaves out, or simply describe the
+project in your own words.
+
+![Upload](docs/screenshots/03-upload.png)
+
+The assistant reads the document and asks only the questions that change the legal assessment:
+who takes decisions, which data, which model, which safeguards. Each question says *why* it
+matters. Questions are yes/no, multiple-choice or free text.
+
+On the left, the **project file** shows what the assistant knows. It is updated after every round
+(at most `MAX_INTERVIEW_ROUNDS` rounds). You can stop at any time and write the report.
+
+![Interview](docs/screenshots/04-interview.png)
+
+![Interview complete](docs/screenshots/05-ready.png)
+
+### 3. Report: verdict, obligations, plan and checklist
+
+While the audit runs, the page streams each step of the agent graph live, over server-sent events.
+
+![Audit in progress](docs/screenshots/06-progress.png)
+
+The report opens with the verdict: risk category, rationale, next deadline and score. Below it:
+
+- **AI Act:** classification and applicable obligations, each with its status and the gap to close.
+- **Deadlines:** the dates that apply to this project, computed deterministically rather than by
+  the model.
+- **GDPR:** assessment of the lawful basis, minimisation, DPIA and data subject rights, with
+  detailed findings.
+
+![AI Act section](docs/screenshots/08-ai-act.png)
+
+The action plan is prioritised from P0 (blocking) to P3, and each action carries its legal basis
+and a due date. The interactive checklist merges the structural obligations of the risk category
+with the recommendations. It is saved as you tick items, and its state is carried into the PDF
+and JSON exports.
+
+![Action plan](docs/screenshots/09-action-plan.png)
+
+![Checklist](docs/screenshots/10-checklist.png)
+
+**Ask about this report** opens an assistant that answers from the report and the official texts.
+It lists its sources and flags any article it cites that does not exist in the corpus.
+
+![Report assistant](docs/screenshots/11-assistant.png)
+
+> The screenshots are produced by `scripts/capture_screenshots.py` with the *scripted* demo model
+> (`scripts/demo_services.py`), so they can be regenerated identically anywhere. Everything else
+> in them is the real application: parsing, legal corpus, retrieval, citation checks, deadlines,
+> score, checklist and export. To capture your own from real model output, run the application
+> and then `python scripts/capture_screenshots.py --url http://127.0.0.1:8000`.
 
 ## Architecture
 
@@ -63,9 +126,8 @@ flowchart LR
         PRE --> BM[("BM25<br/>lexical")]
     end
 
-    UP["Project .pdf / .pptx"] --> PARSE["parse_document<br/>pymupdf4llm · python-pptx"]
-    PARSE --> PROF["profile_project"]
-    PROF --> RW["plan_queries<br/>Query Rewriter"]
+    UP["Deck .pdf / .pptx<br/>+ description"] --> INT["Interview<br/>LLM asks, team answers<br/>(≤ 3 rounds)"]
+    INT --> RW["plan_queries<br/>Query Rewriter"]
     RW --> RET["retrieve<br/>Hybrid + RRF + Reranker"]
     QD -.-> RET
     BM -.-> RET
@@ -75,208 +137,180 @@ flowchart LR
     RT -- sufficient --> GD["audit_gdpr<br/>GDPR agent"]
     AI --> SY["synthesize<br/>Synthesis agent"]
     GD --> SY
-    SY --> REP["Report · Checklist<br/>PDF / JSON · Chatbot"]
+    SY --> REP["Report · Checklist<br/>PDF / JSON · Assistant"]
 
     style RT fill:#fce4ec,stroke:#c2185b
+    style INT fill:#e6edf8,stroke:#1f4fa3
     style REP fill:#e8f5e9,stroke:#2e7d32
 ```
 
 | Stage | Role | Guardrail |
 |---|---|---|
-| **Legal preprocessing** | Splits the texts by article and annex with a state machine that only accepts strictly sequential numbering. Long articles are sub-split on paragraph boundaries. | Integrity check: 113 articles + 13 annexes (AI Act), 99 articles (GDPR) |
+| **Legal preprocessing** | Splits the texts by article and annex with a state machine that only accepts strictly sequential numbering | Integrity check: 113 articles + 13 annexes (AI Act), 99 articles (GDPR) |
+| **Interview** | The LLM asks for the facts that change the legal qualification, and the project profile is refreshed after each round | Bounded number of rounds; deterministic fallback questions if the model fails |
 | **Query Rewriter** | Generates targeted legal sub-questions, written in the language of each corpus | Deterministic anchor queries (Art. 5, Annex III, Art. 6, 22, 35, 50...) |
-| **Hybrid retrieval** | Dense search (Qdrant, strict metadata filters) + BM25, fused with RRF, then reranked by FlashRank (multilingual ONNX) or `BAAI/bge-reranker-v2-m3` | Automatic fallback to the RRF order when the reranker is unavailable |
-| **Rethinker** | An LLM critic checks whether the evidence is sufficient. If not, it reformulates the queries (≤ 2 loops). | A regulation with no evidence forces another iteration; the loop is bounded |
-| **Audit agents** | AI Act classification and GDPR audit run **in parallel** (LangGraph fan-out/fan-in), with Pydantic structured outputs | Every citation is validated against the corpus; invented provisions are flagged |
-| **Synthesis** | Executive summary + prioritised action plan (P0–P3) | **Deadlines, score and checklist are computed by code**, never by the LLM |
+| **Hybrid retrieval** | Dense search (Qdrant, strict metadata filters) + BM25, fused with RRF, then reranked by FlashRank or `BAAI/bge-reranker-v2-m3` | Falls back to the RRF order when the reranker is unavailable |
+| **Rethinker** | An LLM critic checks whether the evidence is sufficient; if not, it reformulates the queries | A regulation with no evidence forces another iteration; the loop is bounded |
+| **Audit agents** | AI Act and GDPR analyses run **in parallel**, with Pydantic structured outputs | Every citation is validated against the corpus; confidence scales and enum spellings are normalised |
+| **Synthesis** | Executive summary + plan prioritised from P0 to P3 | **Deadlines, score and checklist are computed by code**, never by the LLM |
 
-Every LLM call has a **deterministic fallback**. If the local model fails (invalid JSON after
-self-correction, timeout), the audit still completes, with "to verify" statuses and warnings
-in the report.
-
-## Key features
-
-- **Up-to-date regulatory calendar.** AI Act application dates follow Art. 113, as amended by
-  Regulation (EU) 2026/1744 (in force since 27/07/2026):
-  - Annex III high-risk systems: **02/12/2027**
-  - Annex I high-risk products: **02/08/2028**
-  - New prohibitions and end of the Art. 50(2) grace period: **02/12/2026**
-- **Strict metadata on every chunk**: `source`, `article_number`, `annex_number`,
-  `chapter_*`, `section_*`, `risk_category`, `enforcement_date`, `enforcement_note`, `topics`.
-- **3-page Streamlit UI**:
-  1. *Overview & Architecture*: diagram, interactive calendar (Plotly), health of Ollama,
-     Qdrant and the reranker, and a pre-indexing button.
-  2. *Audit & Chatbot*: upload, live progress of the LangGraph nodes, tabbed report, and a
-     contextual chatbot that shows its sources and checks the provisions it cites.
-  3. *Export*: detailed report, interactive checklist with progress, **PDF** (ReportLab) and
-     **JSON** export (the JSON can be reloaded).
-- **Security**:
-  - uploaded files are checked by binary signature and size, then stored under random names;
-  - the document is deleted after the audit;
-  - ports are bound to `127.0.0.1`, the container runs as non-root, and the API key is a `SecretStr`.
+**Web stack.**
+- Server: FastAPI + Jinja2 templates and vanilla JavaScript, with no build step.
+- Fonts: IBM Plex, bundled locally.
+- No CDN or third-party request: a strict Content-Security-Policy (`default-src 'self'`) enforces it.
 
 ## Quick start (Docker)
 
-Requirements: Docker ≥ 24 with Compose v2, and about 16 GB of RAM for `qwen2.5:14b` (or a
-smaller model, see [Configuration](#configuration)).
+Requirements: Docker ≥ 24 with Compose v2, and about 16 GB of RAM for `qwen2.5:14b`.
 
 ```bash
-git clone https://github.com/antoinerougier/Conformity.git
-cd Conformity
+git clone https://github.com/OWNER/eu-ai-compliance-auditor.git
+cd eu-ai-compliance-auditor
 cp .env.example .env          # optional: choose the models
 
 docker compose up -d --build  # NVIDIA GPU: add -f docker-compose.gpu.yml
 docker compose logs -f ollama # first run: models are being pulled
 ```
 
-Open **http://localhost:8501**. On startup:
-
-1. the `ollama` container starts the server and pulls the models
-   (`docker/ollama/entrypoint.sh`). It only becomes *healthy* once every model is ready.
-2. the `app` container waits for Qdrant and Ollama, then indexes the legal corpus if the
-   collection is empty (`AUTO_INDEX=true`).
-3. a demo project is provided: `examples/demo_hirematch.pptx`.
+Open **http://localhost:8000**.
+- The `ollama` container pulls the models, and only becomes healthy once they are ready.
+- The `app` container then indexes the legal corpus if needed and starts the web server.
 
 ## Local installation (uv)
 
 ```bash
-# 1. Dependencies (dev + eval) and git hooks
-make install                  # = uv sync --all-groups && uv run pre-commit install
+uv venv --python 3.12
+uv sync --all-groups
+# Windows: .venv\Scripts\Activate.ps1   -   macOS/Linux: source .venv/bin/activate
 
-# 2. Services: Ollama (https://ollama.com) and Qdrant
 ollama pull qwen2.5:14b && ollama pull bge-m3
-docker run -d -p 6333:6333 qdrant/qdrant:v1.15.4
-#    ...or embedded Qdrant, without Docker: QDRANT_URL= QDRANT_PATH=./data/qdrant_local
 
-# 3. Preprocess + index the legal corpus
-uv run python -m src.rag.preprocess_laws --index --stats
+# Qdrant: embedded (no Docker) ...
+echo "QDRANT_URL=" >> .env && echo "QDRANT_PATH=./data/qdrant_local" >> .env
+# ... or a server: docker run -d -p 6333:6333 qdrant/qdrant:v1.19.1
 
-# 4. UI
-uv run streamlit run app.py
+python -m src.rag.preprocess_laws --index --stats   # build the legal index once
+uvicorn src.api.app:app --reload                    # http://127.0.0.1:8000
 ```
+
+## Try it without Ollama
+
+```bash
+make demo        # = uvicorn scripts.demo_app:app --port 8000
+```
+
+This runs the real interface and pipeline, but with a scripted model whose answers describe the
+WorkPulse 360 example. Use it to explore the interface; for real audits, use the commands above.
 
 ## Configuration
 
-All settings come from environment variables or a `.env` file (see `.env.example`). They are
-validated at startup by `pydantic-settings` (`src/core/config.py`).
+All settings come from environment variables or `.env` (see `.env.example`). They are validated
+at startup by `pydantic-settings` (`src/core/config.py`).
 
 | Variable | Default | Description |
 |---|---|---|
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
-| `LLM_MODEL` | `qwen2.5:14b` | Agents' reasoning model (`mistral-nemo` is an alternative) |
-| `JUDGE_MODEL` | `qwen2.5:14b` | Ragas judge |
-| `EMBEDDING_MODEL` | `bge-m3` | Multilingual embeddings. `nomic-embed-text` is supported; its prefixes are added automatically. |
+| `LLM_MODEL` / `JUDGE_MODEL` | `qwen2.5:14b` | Reasoning model / Ragas judge (`qwen2.5:7b` on machines with less than 16 GB) |
+| `EMBEDDING_MODEL` | `bge-m3` | Multilingual embeddings (`nomic-embed-text` is supported too) |
 | `LLM_NUM_CTX` | `16384` | Context window sent to Ollama |
 | `QDRANT_URL` / `QDRANT_PATH` | `http://localhost:6333` / – | Server or embedded mode (leave `QDRANT_URL` empty for embedded) |
-| `RERANKER_BACKEND` | `flashrank` | `flashrank` · `cross_encoder` (requires the `bge-reranker` extra) · `none` |
-| `RERANK_TOP_N` | `6` | Chunks kept per query |
+| `RERANKER_BACKEND` | `flashrank` | `flashrank` · `cross_encoder` · `none` |
+| `MAX_INTERVIEW_ROUNDS` / `MAX_QUESTIONS_PER_ROUND` | `3` / `5` | Length of the interview |
 | `MAX_RETHINK_ITERATIONS` | `2` | Maximum number of Rethinker loops |
-| `RAGAS_MIN_*` | `0.70 / 0.60 / 0.60` | Quality gates (faithfulness / context / answer) |
+| `SESSION_TTL_HOURS` | `24` | Assessments are kept in memory only, then forgotten |
+| `RAGAS_MIN_*` | `0.70 / 0.60 / 0.60` | Quality gates |
 
-On a modest machine, use `LLM_MODEL=qwen2.5:7b` and `LLM_NUM_CTX=8192`.
+## HTTP API
+
+The pages use a JSON API that you can call directly. The OpenAPI schema is served at `/openapi.json`.
+
+| Method & path | Purpose |
+|---|---|
+| `GET /api/health` | Status of Ollama, Qdrant and the reranker |
+| `POST /api/sessions` | Start an assessment (multipart: `file` and/or `description`) |
+| `POST /api/sessions/{id}/answers` | Answer the current round (`finish: true` closes the interview) |
+| `POST /api/sessions/{id}/audit` | Run the audit in the background |
+| `GET /api/sessions/{id}/events` | Live progress (server-sent events) |
+| `GET /api/sessions/{id}/report` · `.pdf` · `.json` | The report |
+| `PATCH /api/sessions/{id}/checklist/{item}` | Tick a checklist item |
+| `POST /api/sessions/{id}/chat` | Streamed answer about the report (sources in `X-Sources`) |
+| `POST /api/reports/import` | Re-open an exported JSON report |
 
 ## Code quality
 
 - **Pydantic v2 everywhere.**
-  - All domain objects are Pydantic models with `extra="forbid"`: legal chunks, LLM
-    structured outputs, the report and the LangGraph state.
-  - They use constrained types: patterns for CELEX numbers, chunk ids and SHA-256;
-    `ge`/`le` bounds for confidences and scores; non-empty strings.
-  - Cross-field invariants are checked by `model_validator`.
-- **Validated function inputs.**
-  - Every public function that crosses a layer boundary (UI, CLI, LLM output, files) is
-    decorated with `@validated`, a thin wrapper around `pydantic.validate_call`
-    (`src/core/types.py`).
-  - Invalid arguments fail fast with a `ValidationError`. Examples: an empty query, `top_k=0`,
-    a missing file passed as a `FilePath`.
-  - Internal hot paths (tokeniser, parser state machine) are deliberately left undecorated.
-- **Typed services.**
-  - Services are injected through validated containers (`AuditDependencies`, `HybridRetriever`).
-  - Interfaces are `Protocol`s (`LLMService`, `Reranker`), which keeps the agents testable
-    with fakes.
-- **Explicit error model.** A domain exception hierarchy (`src/core/exceptions.py`) separates
-  expected failures from bugs. Broad `except` blocks are lint-enforced (`BLE`) and always
-  justified.
-- **Tooling.**
-  - Ruff: lint + format, with the bugbear, bandit, pylint and pyupgrade rule sets.
-  - `mypy --strict` on the source *and* the tests.
-  - pre-commit hooks, plus deterministic artefacts verified in CI.
+  - Domain models forbid unknown fields and use constrained types (identifiers, hashes, bounds)
+    with cross-field validators.
+  - Public functions that cross a layer boundary are decorated with `@validated`
+    (`pydantic.validate_call`), and request bodies are Pydantic models.
+- **Robust to local models.** Structured outputs are requested as a JSON schema, and a validation
+  error is fed back to the model so it can correct itself. Common deviations are normalised
+  before validation: confidence given as `85` or `"85%"`, or `"High-risk"` instead of `high_risk`.
+- **Typed services.** Services are injected through `AppServices` and `AuditDependencies`.
+  Interfaces are `Protocol`s, which keeps everything testable with fakes.
+- **Explicit error model.** A domain exception hierarchy is mapped to HTTP errors (JSON for the
+  API, HTML for the pages).
+- **Tooling.** Ruff (with the bugbear, bandit, pylint and pyupgrade rule sets), `mypy --strict`
+  on the source, tests and scripts, and pre-commit hooks.
 
 ## Testing & evaluation
 
 ```bash
 make check                                   # ruff + mypy --strict + pytest (no external service)
 uv run pytest tests/eval -m eval -v --no-cov # Ragas (requires Ollama + index)
-uv run python -m src.evaluation.dataset --per-source 10   # synthetic test set
+make screenshots                             # re-capture the README screenshots
 ```
 
-- **Unit & integration tests** run on the real corpus, with:
-  - in-memory Qdrant and deterministic embeddings;
-  - a scripted fake LLM that covers the Rethinker loop, parallel agents, degraded mode and
-    hallucination detection;
-  - a fake Ollama HTTP server that checks the JSON schema, self-correction and streaming;
-  - `streamlit.testing` for the pages.
-
-  CI also checks that `data/processed/legal_chunks.jsonl` regenerates byte-for-byte from the PDFs.
+- **145 unit & integration tests:**
+  - legal parsing on the real texts;
+  - retrieval with in-memory Qdrant;
+  - the LangGraph flow (Rethinker loop, parallel agents, degraded mode);
+  - the interview engine;
+  - the Ollama adapter, tested against a fake HTTP server;
+  - the full web flow through FastAPI's `TestClient`: pages, upload, interview, SSE progress,
+    report, checklist, exports and assistant.
 - **Ragas evaluation** (`tests/eval/test_ragas.py`):
-  - the Ollama judge is plugged in through `LangchainLLMWrapper` / `LangchainEmbeddingsWrapper`;
-  - metrics: `faithfulness`, `nv_context_relevance` and `answer_relevancy`;
-  - two deterministic checks: the reference provision is retrieved, and no non-existent
-    provision is cited;
-  - test set: 14 curated *golden* questions verified against the texts, plus the synthetic
-    set when it has been generated.
-- **GitHub Actions CI**:
-  - pipeline: ruff → mypy → pytest (Python 3.11 / 3.12 / 3.13) → Docker build → Ragas
-    evaluation, with Ollama installed on the runner;
-  - Ragas runs on `main`, weekly, on demand, or on PRs labelled `run-eval`;
-  - the CPU runner uses smaller models (`qwen2.5:3b` / `7b`) with adjusted thresholds, and
-    reports are uploaded as artefacts.
+  - metrics: faithfulness, context relevance and answer relevancy, scored by an Ollama judge
+    plugged in through the LangChain wrappers;
+  - two deterministic checks: the reference article is retrieved, and no non-existent
+    article is cited.
+- **CI**:
+  - pipeline: ruff → mypy → pytest (Python 3.11 to 3.13) → Docker build → Ragas;
+  - the Ragas job runs a small model on the CPU runner, with embedded Qdrant and its own timeout.
 
 ## Repository layout
 
 ```
-├── app.py                       # Streamlit entry point (st.navigation)
-├── pages/                       # presentation.py · audit.py · export.py
 ├── src/
-│   ├── core/                    # config (pydantic-settings), types (@validated), exceptions, llm, logging
-│   ├── models/schemas.py        # Pydantic models: corpus, LLM outputs, report, LangGraph state
+│   ├── api/                     # FastAPI app: routes (pages + JSON API), sessions, templates, static assets
+│   ├── agents/                  # LangGraph graph & nodes, interview engine, prompts, report assistant
+│   ├── rag/                     # legal preprocessing, Qdrant store, hybrid retriever + rerankers
+│   ├── compliance/              # deadlines, obligation catalogue, citation checks, scoring
 │   ├── ingestion/parser.py      # PDF (pymupdf4llm) & PPTX (python-pptx) -> Markdown
-│   ├── rag/
-│   │   ├── preprocess_laws.py   # Structure-aware legal splitting + metadata (CLI)
-│   │   ├── vector_store.py      # Qdrant: idempotent indexing, filters
-│   │   └── retriever.py         # BM25, RRF, rerankers, hybrid retriever
-│   ├── agents/
-│   │   ├── graph.py             # LangGraph graph + ComplianceAuditor facade
-│   │   ├── nodes.py             # Nodes: rewriter, retrieve, rethinker, agents, synthesis
-│   │   ├── prompts.py           # System prompts
-│   │   └── chat.py              # Chatbot / legal QA
-│   ├── compliance/              # timeline (deadlines), obligations (checklist), citations, scoring
-│   ├── evaluation/              # Synthetic test set + Ragas wiring
-│   ├── export/pdf_generator.py  # PDF (ReportLab) & JSON report
-│   └── ui/services.py           # Cached Streamlit resources, session state
-├── data/
-│   ├── regulations/             # Official PDFs: AI Act (EN) & GDPR (FR)
-│   └── processed/legal_chunks.jsonl
-├── tests/ unit/ · integration/ · eval/ (test_ragas.py, data/golden_testset.jsonl)
-├── examples/demo_hirematch.pptx
-├── Dockerfile · docker-compose.yml · docker-compose.gpu.yml · docker/
-├── Makefile · .pre-commit-config.yaml
-└── .github/workflows/ci.yml
+│   ├── models/schemas.py        # Pydantic models: corpus, LLM outputs, interview, report, graph state
+│   ├── evaluation/              # synthetic test set + Ragas wiring
+│   ├── export/pdf_generator.py  # PDF (ReportLab) & JSON
+│   └── core/                    # settings, validated types, exceptions, Ollama client, logging
+├── scripts/                     # demo app, screenshot capture, example generator
+├── examples/                    # WorkPulse 360 (high risk) and Atlas Assist (compliant) project PDFs
+├── docs/screenshots/            # README images
+├── data/regulations/ · data/processed/legal_chunks.jsonl
+├── tests/ unit/ · integration/ · eval/
+└── Dockerfile · docker-compose.yml · .github/workflows/ci.yml · Makefile
 ```
 
 ## Known limitations
 
-- The indexed AI Act text is the **original** version (OJ of 12/07/2024). The amendments of
-  Regulation 2026/1744 are reflected in the dates and the calendar, not in the article text.
-  Replace the PDF with a consolidated version to index them (see `data/regulations/README.md`).
-- The GDPR corpus is the official **French** version, so GDPR retrieval queries are written in
-  French. All analyses, reports and the UI are in English. Any other official language
-  version can be used by adapting `GDPR_SPEC`.
-- GDPR recitals and EDPB guidelines are not part of the corpus.
-- Scanned documents require prior OCR.
-- Analysis quality depends on the local model; `qwen2.5:14b` or larger is recommended in
-  production.
+- **AI Act text.** The indexed text is the original version. The 2026/1744 amendments are
+  reflected in the dates and the calendar, not in the article text.
+- **GDPR language.** The GDPR corpus is the official French version (retrieval queries for it are
+  in French); all analyses and the interface are in English.
+- **Sessions.** They live in memory, so restarting the server clears them. Export the JSON to
+  keep a report.
+- **Model quality.** Results depend on the local model: `qwen2.5:14b` or larger is recommended,
+  and scanned documents need OCR first.
 
 ## License
 
 MIT. Legal texts: © European Union, EUR-Lex (reuse authorised, Decision 2011/833/EU).
+IBM Plex fonts: SIL Open Font License (`src/api/static/fonts/OFL.txt`).

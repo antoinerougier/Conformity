@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} - EU AI Compliance Auditor{% endblock %}
+{% block content %}
+<section class="intro">
+  <h1>{{ "Page not found" if code == 404 else "Something needs fixing" }}</h1>
+  <p>{{ message }}</p>
+  <p><a class="btn btn--primary" href="/assessment">Start an assessment</a></p>
+</section>
+{% endblock %}
